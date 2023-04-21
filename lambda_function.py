@@ -8,9 +8,10 @@ import datetime
 S3_BUCKET_BACKUP = "sql-backup-2023"
 SERVER = "database-poc-test.ckkscxdfuhqg.us-east-1.rds.amazonaws.com"
 PORT = 1433  # int(os.environ['DB_PORT'])
+SQS_QUEUE_URL = os.environ['SQS_QUEUE_URL']
 USER = "admin"  # os.environ['DB_USER']
 PASSWORD = "19xdnbdaZDsJPrGSaNyt"  # os.environ['DB_PASSWORD']
-DATABASE = "testing_database"  # os.environ['DB_NAME']
+DATABASE_RESTORE = "testing_database"  # os.environ['DATABASE_RESTORE']
 DB_INSTANCE_IDENTIFIER = 'database-poc-test'
 DB_SNAP_SHOT_IDENTIFIER = 'database-testing-poc-snapshot'
 QUERY_SAVE_BACKUP = "exec msdb.dbo.rds_backup_database @source_db_name='%s', @s3_arn_to_backup_to='arn:aws:s3:::%s/%s', @overwrite_S3_backup_file=1;"
@@ -26,14 +27,13 @@ def lambda_handler(event, context):
             port=PORT,
             user=USER,
             password=PASSWORD,
-            database=DATABASE
+            database=DATABASE_RESTORE
         )
         cursor = conn.cursor()
         
         localDate = datetime.now()
-        date = localDate.strftime('%m-%d-%Y')
-        nameBackup = "backup_%s_%s.bak" % (DATABASE,date)
-        queryExecute= QUERY_SAVE_BACKUP % (DATABASE,S3_BUCKET_BACKUP )
+        nameBackup = "backup_%s_%s.bak" % (DATABASE_RESTORE,localDate.strftime('%m_%d_%Y'))
+        queryExecute= QUERY_SAVE_BACKUP % (DATABASE_RESTORE,S3_BUCKET_BACKUP )
         cursor.execute(QUERY_SAVE_BACKUP)
         result = cursor.fetchall()
 
@@ -45,24 +45,10 @@ def lambda_handler(event, context):
         raise e
 
 
-def resotoreBackup():
-    rdsClient = boto3.client('rds')
-    response = rdsClient.restore_db_instance_from_db_snapshot(DBInstanceIdentifier="temporaRestore",
-                                                           DBSnapshotIdentifier=DB_SNAP_SHOT_IDENTIFIER,
-                                                           PubliclyAccessible=True,
-                                                           Tags=[
-                                                               {
-                                                                   'Key': 'Serivice',
-                                                                   'Value': 'restoro temporal backup'
-                                                               },
-                                                           ],)
-
-    return response
 
 
 if __name__ == '__main__':
     event = {}
     context = {}
-    # print(resotoreBackup())
     result = lambda_handler(event, context)
     print("lambda_handler: ", result)
