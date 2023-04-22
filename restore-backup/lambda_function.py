@@ -5,7 +5,8 @@ import os
 
 DB_INSTANCE_IDENTIFIER = 'database-poc-test'
 DB_SNAP_SHOT_IDENTIFIER = 'database-testing-poc-snapshot'
-DATABASE_RESTORE = "testing_database"  # os.environ['DATABASE_RESTORE']
+OPTION_GROUP_NAME = os.environ['OPTION_GROUP_NAME']
+DATABASE_RESTORE = os.environ['DATABASE_RESTORE']
 BACKUP_TARGET = 'db-clone-restore-database-temporal'
 SQS_QUEUE_URL = os.environ['SQS_QUEUE_URL']
 
@@ -23,6 +24,7 @@ def resotoreBackup():
     rdsClient = boto3.client('rds')
     response = rdsClient.restore_db_instance_from_db_snapshot(DBInstanceIdentifier=BACKUP_TARGET,
                                                            DBSnapshotIdentifier=DB_SNAP_SHOT_IDENTIFIER,
+                                                           OptionGroupName=OPTION_GROUP_NAME,
                                                            PubliclyAccessible=True,
                                                            Tags=[
                                                                {
