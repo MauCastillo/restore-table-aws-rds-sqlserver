@@ -1,4 +1,5 @@
 import boto3
+import json
 import os
 
 
@@ -32,7 +33,6 @@ def resotoreBackup():
         DBSnapshotIdentifier=DB_SNAP_SHOT_IDENTIFIER,
         PubliclyAccessible=True,
         VpcSecurityGroupIds=[
-            "sg-04343444ece6df193",
             VPC_SECURITY_GROUP_ID,
         ],
         Tags=[
@@ -44,25 +44,15 @@ def resotoreBackup():
 
 
 def sendSQSMessage():
+    messageSQS = {
+        "backup_target_clone": BACKUP_TARGET_CLONE,
+        "database_restore": DATABASE_TO_RESTORE,
+        "db_instance_identifier": DB_INSTANCE_IDENTIFIER,
+        "db_snapshot_identifier": DB_SNAP_SHOT_IDENTIFIER,
+    }
+
     response = SQSClient.send_message(
         QueueUrl=SQS_QUEUE_URL,
         DelaySeconds=SQS_DELAY,
-        MessageAttributes={
-            "backup-target": {"DataType": "String", "StringValue": BACKUP_TARGET_CLONE},
-            "database-restore": {
-                "DataType": "String",
-                "StringValue": DATABASE_TO_RESTORE,
-            },
-            "db-instance-identifier": {
-                "DataType": "String",
-                "StringValue": DB_INSTANCE_IDENTIFIER,
-            },
-            "db-snap-shot-identifier": {
-                "DataType": "String",
-                "StringValue": DB_SNAP_SHOT_IDENTIFIER,
-            },
-        },
-        MessageBody=("test backup" "week of 12/11/2016."),
+        MessageBody=(json.dumps(messageSQS)),
     )
-
-    print(response["MessageId"])
