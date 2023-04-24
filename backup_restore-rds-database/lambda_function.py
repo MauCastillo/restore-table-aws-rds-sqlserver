@@ -7,6 +7,7 @@ DB_SNAP_SHOT_IDENTIFIER = os.environ["DB_SNAP_SHOT_IDENTIFIER"]
 OPTION_GROUP_NAME = os.environ["OPTION_GROUP_NAME"]
 DATABASE_TO_RESTORE = os.environ["DATABASE_TO_RESTORE"]
 BACKUP_TARGET_CLONE = os.environ["BACKUP_TARGET_CLONE"]
+VPC_SECURITY_GROUP_ID = os.environ["VPC_SECURITY_GROUP_ID"]
 SQS_QUEUE_URL = os.environ["SQS_QUEUE_URL"]
 SQS_DELAY = int(os.environ["SQS_DELAY"])
 
@@ -15,7 +16,6 @@ SQSClient = boto3.client("sqs")
 
 
 def lambda_handler(event, context):
-    print("SQS Event", event)
     try:
         result = resotoreBackup()
         sendSQSMessage()
@@ -31,6 +31,10 @@ def resotoreBackup():
         DBInstanceIdentifier=BACKUP_TARGET_CLONE,
         DBSnapshotIdentifier=DB_SNAP_SHOT_IDENTIFIER,
         PubliclyAccessible=True,
+        VpcSecurityGroupIds=[
+            "sg-04343444ece6df193",
+            VPC_SECURITY_GROUP_ID,
+        ],
         Tags=[
             {"Key": "Serivice", "Value": "restoro temporal backup"},
         ],
