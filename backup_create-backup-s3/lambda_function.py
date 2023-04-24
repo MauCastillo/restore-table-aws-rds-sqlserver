@@ -26,6 +26,7 @@ QuerySaveBackup = "exec msdb.dbo.rds_backup_database @source_db_name='%s', @s3_a
 
 
 def lambda_handler(event, context):
+    print(">>>>>>>>>>>>>>>>>>>>>>> SQS Event <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<", event)
     response = RDSClient.describe_db_instances(DBInstanceIdentifier=BACKUP_TARGET)
     dbInstances = response["DBInstances"]
     if len(dbInstances) < 1:
