@@ -22,12 +22,14 @@ DATABASE_TO_RESTORE = os.environ["DATABASE_TO_RESTORE"]
 S3_BUCKET_BACKUP = os.environ["S3_BUCKET_BACKUP"]
 
 RDSClient = boto3.client("rds")
-SQSClient = boto3.client("sqs")
+SQSClient = boto3.resource("sqs")
+S3Client = boto3.resource("s3")
 queue = SQSClient.get_queue_by_name(QueueName="restore-backup-database")
 QuerySaveBackup = "exec msdb.dbo.rds_backup_database @source_db_name='%s', @s3_arn_to_backup_to='arn:aws:s3:::%s/%s', @overwrite_S3_backup_file=1;"
 
 
 def lambda_handler(event, context):
+    print(queue.url)
     for message in queue.receive_messages():
         try:
             response = RDSClient.describe_db_instances(
@@ -50,6 +52,7 @@ def lambda_handler(event, context):
             )
 
             cursor = conn.cursor()
+            print("estado 1")
 
             localDate = datetime.now()
             nameBackup = "backup_%s_%s.bak" % (
@@ -76,10 +79,9 @@ def lambda_handler(event, context):
             time.sleep(10 * 60)
             continue
         message.delete()
-        print(" >>> result <<< ", result)
         sendSQSMessage(rdsInstanceURL, taskID, nameBackup)
 
-    return result
+    return {"status": "success"}
 
 
 def sendSQSMessage(urlRdsInstance, taskID, backupName):

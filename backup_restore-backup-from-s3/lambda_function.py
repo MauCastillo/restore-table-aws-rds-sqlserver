@@ -2,57 +2,66 @@ import json
 import os
 import pymssql
 import boto3
-from datetime import datetime
-
-# os.environ['DB_HOST']
+import time
 
 PORT = 1433  # int(os.environ['DB_PORT'])
 USER = "admin"  # os.environ['DB_USER']
 PASSWORD = "19xdnbdaZDsJPrGSaNyt"  # os.environ['DB_PASSWORD']
 DB_INSTANCE_IDENTIFIER = "database-poc-test"
 DB_SNAP_SHOT_IDENTIFIER = "database-testing-poc-snapshot"
-BACKUP_TARGET_CLONE = os.environ["BACKUP_TARGET_CLONE"]
-
 BACKUP_TARGET = "db-clone-restore-database-temporal"
 
-SQS_QUEUE_URL = os.environ["SQS_QUEUE_URL"]
 SQS_DELAY = int(os.environ["SQS_DELAY"])
 DATABASE_TO_RESTORE = os.environ["DATABASE_TO_RESTORE"]
 S3_BUCKET_BACKUP = os.environ["S3_BUCKET_BACKUP"]
 
 RDSClient = boto3.client("rds")
-SQSClient = boto3.client("sqs")
-QueryListTask = "exec msdb.dbo.rds_task_status @task_id=%s;"
+SQSClient = boto3.resource('sqs')
+S3Client = boto3.resource('s3')
+
+queue = SQSClient.get_queue_by_name(QueueName="start-restore-backup-rds")
+QueryRemoveDatabase = "DROP DATABASE %s;"
+QueryRestore = "exec msdb.dbo.rds_restore_database @restore_db_name='%s', @s3_arn_to_restore_from='arn:aws:s3:::%s/%s', @with_norecovery=1,"
 
 
 def lambda_handler(event, context):
-    response = RDSClient.describe_db_instances(DBInstanceIdentifier=BACKUP_TARGET)
-    records = event["Records"]
-    if len(records) <= 0:
-        return {"error":"SQS Message not found"}
+    print(queue.url)
+    for message in queue.receive_messages():
+        try:
+            print("Procesando el mensaje: {}".format(message.body))
+            sqsBody = json.loads(message.body)
+            S3Client.Object(S3_BUCKET_BACKUP, sqsBody["backup_name"]).load()
 
-    sqsBody = json.loads(records[0]["body"])
-    conn = pymssql.connect(
-        server=sqsBody["url_rds_instances"],
-        port=PORT,
-        user=USER,
-        password=PASSWORD,
-        database=sqsBody["database_restore"],
-    )
-    cursor = conn.cursor()
-    query = QueryListTask % sqsBody["task_id"]
-    print("query jaja",query)
+            conn = pymssql.connect(
+                server="database-poc-test.ckkscxdfuhqg.us-east-1.rds.amazonaws.com",
+                port=PORT,
+                user=USER,
+                password=PASSWORD,
+                database=sqsBody["database_restore"],
+            )
 
-    cursor.execute(query)
-    result = cursor.fetchone()
-    if len(result) <= 4:
-        return {"error":"SQS Message not found"}
-    
-    print("lifecycle",str(result[5]))
-    taskID = str(result[5])
-    conn.close()
+            cursor = conn.cursor()
 
-    return result
+            query = QueryRemoveDatabase % sqsBody["database_restore"]
+            print("---- query ----", query)
+            cursor.execute(query)
+            
+
+            
+            queryRestore = QueryRestore % (
+                sqsBody["database_restore"],
+                S3_BUCKET_BACKUP,
+                sqsBody["backup_name"],
+            )
+            print("---- Query Restore ----", queryRestore)
+            cursor.execute(queryRestore)
+
+        except Exception as e:
+            print("Error al procesar el mensaje: {}".format(e))
+            time.sleep(10 * 60)
+            continue
+
+        message.delete()
 
 
 if __name__ == "__main__":

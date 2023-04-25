@@ -3,10 +3,11 @@ lambda_function := backup_create-backup-s3
 
 export S3_BUCKET_BACKUP=backup-sql-server-unique-database
 export DATABASE_TO_RESTORE=testing_database_restore
-export SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/945779552753/restore-backup-database
+export SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/945779552753/start-restore-backup-rds
 export BACKUP_TARGET_CLONE=db-clone-restore-database-temporal
 export VPC_SECURITY_GROUP_ID=sg-04343444ece6df193
 export SQS_DELAY=30
+
 
 deploy:
 	cp ../dependencies/deployment-package.zip $(lambda_function).zip
