@@ -19,7 +19,6 @@ SQSClient = boto3.client("sqs")
 def lambda_handler(event, context):
     try:
         result = resotoreBackup()
-        sendSQSMessage()
         return result
 
     except Exception as e:
@@ -40,10 +39,12 @@ def resotoreBackup():
         ],
     )
 
+    sendSQSMessage()
     return response
 
 
 def sendSQSMessage():
+
     messageSQS = {
         "backup_target_clone": BACKUP_TARGET_CLONE,
         "database_restore": DATABASE_TO_RESTORE,
@@ -56,3 +57,6 @@ def sendSQSMessage():
         DelaySeconds=SQS_DELAY,
         MessageBody=(json.dumps(messageSQS)),
     )
+    print(">>> SQSClient.send_message <<<",response)
+
+    return response

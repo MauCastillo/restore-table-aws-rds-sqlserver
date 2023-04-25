@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import pymssql
 import boto3
 from datetime import datetime
@@ -22,67 +23,74 @@ S3_BUCKET_BACKUP = os.environ["S3_BUCKET_BACKUP"]
 
 RDSClient = boto3.client("rds")
 SQSClient = boto3.client("sqs")
+queue = SQSClient.get_queue_by_name(QueueName="restore-backup-database")
 QuerySaveBackup = "exec msdb.dbo.rds_backup_database @source_db_name='%s', @s3_arn_to_backup_to='arn:aws:s3:::%s/%s', @overwrite_S3_backup_file=1;"
 
 
 def lambda_handler(event, context):
-    print(" SQS Event ", event)
-    response = RDSClient.describe_db_instances(DBInstanceIdentifier=BACKUP_TARGET)
-    dbInstances = response["DBInstances"]
-    if len(dbInstances) < 1:
-        return {"error": "Instances not found"}
+    for message in queue.receive_messages():
+        try:
+            response = RDSClient.describe_db_instances(
+                DBInstanceIdentifier=BACKUP_TARGET
+            )
+            dbInstances = response["DBInstances"]
+            if len(dbInstances) < 1:
+                return {"error": "Instances not found"}
 
-    rdsInstanceURL = dbInstances[0]["Endpoint"]["Address"]
-    sqsBody = {}
+            rdsInstanceURL = dbInstances[0]["Endpoint"]["Address"]
 
-    records = event["Records"]
-    if len(records) > 0:
-        sqsBody = json.loads(records[0]["body"])
+            sqsBody = json.loads(message.body)
 
-    try:
-        # Configuración de la conexión
-        conn = pymssql.connect(
-            server=rdsInstanceURL,
-            port=PORT,
-            user=USER,
-            password=PASSWORD,
-            database=sqsBody["database_restore"],
-        )
-        cursor = conn.cursor()
+            conn = pymssql.connect(
+                server=rdsInstanceURL,
+                port=PORT,
+                user=USER,
+                password=PASSWORD,
+                database=sqsBody["database_restore"],
+            )
 
-        localDate = datetime.now()
-        nameBackup = "backup_%s_%s.bak" % (
-            sqsBody["database_restore"],
-            localDate.strftime("%m_%d_%Y"),
-        )
+            cursor = conn.cursor()
 
-        sqlServerExecute = QuerySaveBackup % (
-            sqsBody["database_restore"],
-            S3_BUCKET_BACKUP,
-            nameBackup,
-        )
+            localDate = datetime.now()
+            nameBackup = "backup_%s_%s.bak" % (
+                sqsBody["database_restore"],
+                localDate.strftime("%m_%d_%Y"),
+            )
 
-        print(">>> sqlServerExecute <<<", sqlServerExecute)
-        cursor.execute(sqlServerExecute)
-        result = cursor.fetchall()
+            sqlServerExecute = QuerySaveBackup % (
+                sqsBody["database_restore"],
+                S3_BUCKET_BACKUP,
+                nameBackup,
+            )
 
-        conn.close()
-        print("SQL Server Execution: ", sqlServerExecute)
-        print("Result: ", result)
-        return result
+            cursor.execute(sqlServerExecute)
+            result = cursor.fetchone()
 
-    except Exception as e:
-        # sendSQSMessage()
-        print(str(e))
-        raise e
+            print("task_id", str(result[0]))
+            taskID = str(result[0])
+
+            conn.close()
+
+        except Exception as e:
+            print("Error al procesar el mensaje: {}".format(e))
+            time.sleep(10 * 60)
+            continue
+        message.delete()
+        print(" >>> result <<< ", result)
+        sendSQSMessage(rdsInstanceURL, taskID, nameBackup)
+
+    return result
 
 
-def sendSQSMessage():
+def sendSQSMessage(urlRdsInstance, taskID, backupName):
     messageSQS = {
         "backup-target": BACKUP_TARGET_CLONE,
         "database-restore": DATABASE_TO_RESTORE,
         "db-instance-identifier": DB_INSTANCE_IDENTIFIER,
         "db-snap-shot-identifier": DB_SNAP_SHOT_IDENTIFIER,
+        "url_rds_instances": urlRdsInstance,
+        "task_id": taskID,
+        "backup_name": backupName,
     }
 
     response = SQSClient.send_message(
@@ -96,54 +104,27 @@ def sendSQSMessage():
 
 if __name__ == "__main__":
     event = {
-        {
-            "Records": [
-                {
-                    "messageId": "514014ec-9a6c-45ed-adb0-990645d0a0a2",
-                    "receiptHandle": "AQEBE8etnBcM+hl2MPe+rnR2OxwdF6uFVZGFmF5IuIaemFFd0AKqk3ZGnrYbwDnFMkfcbNEQJb8o/S0Xy1295lYFY0Z3PvbkmgMqnTrVxiTY5Ar7YQufQQpRVxg9PAHy1VjboqaZiu+UzLzX5KvC9x3oy4VhN/SbCQtW6AWe7xdy2B9SNGUK6R1/Dx3wtPIY4s8T14sTULgG9siKLAskoT4GswVeSbMhO9CFIOSEnsph1sNBbBkQnka48F6SyL/REIibfITo1ZqtDNxtIhqbDjjk3/EACPML/365VzgaAZfjNY7USp1tb92oNe441ZRupLY1X+6nFctZjibWfWNyihpUeXvCuw2d/sLG1Ar4o36YTnBVgQD3919yxjCzdJBjqedGhSnj6UWxCkK8JbiKvq+lSA==",
-                    "body": "test backupweek of 12/11/2016.",
-                    "attributes": {
-                        "ApproximateReceiveCount": "1",
-                        "AWSTraceHeader": "Root=1-6446f995-396320c7187ef97201dbefcb;Parent=512388d51807ff9e;Sampled=0;Lineage=ed3a6528:0",
-                        "SentTimestamp": "1682373016226",
-                        "SenderId": "AROA5YNG2WHY2SQ2TUS5N:backup_restore-rds-database",
-                        "ApproximateFirstReceiveTimestamp": "1682373036226",
-                    },
-                    "messageAttributes": {
-                        "backup-target": {
-                            "stringValue": "db-clone-restore-database-temporal",
-                            "stringListValues": [],
-                            "binaryListValues": [],
-                            "dataType": "String",
-                        },
-                        "db-instance-identifier": {
-                            "stringValue": "database-poc-test",
-                            "stringListValues": [],
-                            "binaryListValues": [],
-                            "dataType": "String",
-                        },
-                        "database-restore": {
-                            "stringValue": "testing_database_restore",
-                            "stringListValues": [],
-                            "binaryListValues": [],
-                            "dataType": "String",
-                        },
-                        "db-snap-shot-identifier": {
-                            "stringValue": "recovery-test",
-                            "stringListValues": [],
-                            "binaryListValues": [],
-                            "dataType": "String",
-                        },
-                    },
-                    "md5OfBody": "929d4a2b2504c89517d815dd975d93fd",
-                    "md5OfMessageAttributes": "6cd0a92926cd38179cffcb9466a1f507",
-                    "eventSource": "aws:sqs",
-                    "eventSourceARN": "arn:aws:sqs:us-east-1:945779552753:restore-backup-database",
-                    "awsRegion": "us-east-1",
-                }
-            ]
-        }
+        "Records": [
+            {
+                "messageId": "8a9ecb04-f7c2-4c72-ac99-6d33655a0f55",
+                "receiptHandle": "AQEBIupDkoFE/jd4wS0Y9bkXdJaW4Z4BTbP6X2xRAVb98dV8Ppx4FBUTkAefu6ROZ2tgCn970GprZKfuW9znhOe6ao2WeOIpqnJhXqdaOtAK1nTW27UI5UR3Dqr0e/EMO53OwixzcfImv5P6jndoQYbXZGwKsfG7iDO9PUHvrl70NAt1Niz0RGAQEZZZhPJUyrhRsOGh24tQigbq3T1G7MNJ0LWVMN7mLyNjz1NjYPfPKTAqxEYe97mKpjZrVuHx2vffvCi5VLBasfUiiKrxnGpa7Dn6hWIxDshOJMOVkuBj4J+J35ivZrWiDd6aSYCON7e63Khil4kktyZXiQGHLi68AnadDu8UsiuKeRHH8tuONUigaThDGUiwBAZdGDg8OifI9+klItJIVfMxOY4Uswkg2g==",
+                "body": '{"backup_target_clone": "db-clone-restore-database-temporal", "database_restore": "testing_database_restore", "db_instance_identifier": "database-poc-test", "db_snapshot_identifier": "recovery-test"}',
+                "attributes": {
+                    "ApproximateReceiveCount": "2",
+                    "AWSTraceHeader": "Root=1-6447018c-62cb3d2d583ece3120a3f9f5;Parent=0296019439621060;Sampled=0;Lineage=ed3a6528:0",
+                    "SentTimestamp": "1682375056364",
+                    "SenderId": "AROA5YNG2WHY2SQ2TUS5N:backup_restore-rds-database",
+                    "ApproximateFirstReceiveTimestamp": "1682375076364",
+                },
+                "messageAttributes": {},
+                "md5OfBody": "935103e11e8b7a8cfeb5b1203185d020",
+                "eventSource": "aws:sqs",
+                "eventSourceARN": "arn:aws:sqs:us-east-1:945779552753:restore-backup-database",
+                "awsRegion": "us-east-1",
+            }
+        ]
     }
+
     context = {}
     result = lambda_handler(event, context)
     print("lambda_handler: ", result)
