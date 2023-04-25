@@ -22,26 +22,30 @@ DATABASE_TO_RESTORE = os.environ["DATABASE_TO_RESTORE"]
 S3_BUCKET_BACKUP = os.environ["S3_BUCKET_BACKUP"]
 
 RDSClient = boto3.client("rds")
-SQSClient = boto3.resource("sqs")
+SQSClient = boto3.client("sqs")
 S3Client = boto3.resource("s3")
-queue = SQSClient.get_queue_by_name(QueueName="restore-backup-database")
 QuerySaveBackup = "exec msdb.dbo.rds_backup_database @source_db_name='%s', @s3_arn_to_backup_to='arn:aws:s3:::%s/%s', @overwrite_S3_backup_file=1;"
 
 
 def lambda_handler(event, context):
-    print(queue.url)
-    for message in queue.receive_messages():
+    sqsBody={}
+    records = event["Records"]
+    print("even mock::::::", records)
+
+    for message in records:
         try:
+            print("::message::", message)
             response = RDSClient.describe_db_instances(
                 DBInstanceIdentifier=BACKUP_TARGET
             )
+
             dbInstances = response["DBInstances"]
             if len(dbInstances) < 1:
                 return {"error": "Instances not found"}
 
             rdsInstanceURL = dbInstances[0]["Endpoint"]["Address"]
 
-            sqsBody = json.loads(message.body)
+            sqsBody = json.loads(message['body'])
 
             conn = pymssql.connect(
                 server=rdsInstanceURL,

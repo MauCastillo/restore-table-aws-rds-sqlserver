@@ -16,35 +16,36 @@ DATABASE_TO_RESTORE = os.environ["DATABASE_TO_RESTORE"]
 S3_BUCKET_BACKUP = os.environ["S3_BUCKET_BACKUP"]
 
 RDSClient = boto3.client("rds")
-SQSClient = boto3.resource('sqs')
+SQSClient = boto3.client('sqs')
 S3Client = boto3.resource('s3')
 
-queue = SQSClient.get_queue_by_name(QueueName="start-restore-backup-rds")
 QueryRemoveDatabase = "DROP DATABASE %s;"
-QueryRestore = "exec msdb.dbo.rds_restore_database @restore_db_name='%s', @s3_arn_to_restore_from='arn:aws:s3:::%s/%s', @with_norecovery=1,"
+QueryRestore = "exec msdb.dbo.rds_restore_database @restore_db_name='%s', @s3_arn_to_restore_from='arn:aws:s3:::%s/%s', @with_norecovery=1;"
 
 
 def lambda_handler(event, context):
-    print(queue.url)
-    for message in queue.receive_messages():
+    sqsBody={}
+    records = event["Records"]
+    print("even mock::::::", records)
+
+    for message in records:
         try:
-            print("Procesando el mensaje: {}".format(message.body))
-            sqsBody = json.loads(message.body)
+            print("Procesando el mensaje: {}".format(message['body']))
+            sqsBody = json.loads(message['body'])
             S3Client.Object(S3_BUCKET_BACKUP, sqsBody["backup_name"]).load()
 
             conn = pymssql.connect(
                 server="database-poc-test.ckkscxdfuhqg.us-east-1.rds.amazonaws.com",
                 port=PORT,
                 user=USER,
-                password=PASSWORD,
-                database=sqsBody["database_restore"],
+                password=PASSWORD
             )
 
             cursor = conn.cursor()
 
-            query = QueryRemoveDatabase % sqsBody["database_restore"]
-            print("---- query ----", query)
-            cursor.execute(query)
+            # query = QueryRemoveDatabase % sqsBody["database_restore"]
+            # print("---- query ----", query)
+            # cursor.execute(query)
             
 
             
@@ -70,7 +71,7 @@ if __name__ == "__main__":
             {
                 "messageId": "8a9ecb04-f7c2-4c72-ac99-6d33655a0f55",
                 "receiptHandle": "AQEBIupDkoFE/jd4wS0Y9bkXdJaW4Z4BTbP6X2xRAVb98dV8Ppx4FBUTkAefu6ROZ2tgCn970GprZKfuW9znhOe6ao2WeOIpqnJhXqdaOtAK1nTW27UI5UR3Dqr0e/EMO53OwixzcfImv5P6jndoQYbXZGwKsfG7iDO9PUHvrl70NAt1Niz0RGAQEZZZhPJUyrhRsOGh24tQigbq3T1G7MNJ0LWVMN7mLyNjz1NjYPfPKTAqxEYe97mKpjZrVuHx2vffvCi5VLBasfUiiKrxnGpa7Dn6hWIxDshOJMOVkuBj4J+J35ivZrWiDd6aSYCON7e63Khil4kktyZXiQGHLi68AnadDu8UsiuKeRHH8tuONUigaThDGUiwBAZdGDg8OifI9+klItJIVfMxOY4Uswkg2g==",
-                "body": '{"task_id":"11", "url_rds_instances": "db-clone-restore-database-temporal.ckkscxdfuhqg.us-east-1.rds.amazonaws.com", "backup_target_clone": "db-clone-restore-database-temporal", "database_restore": "testing_database_restore", "db_instance_identifier": "database-poc-test", "db_snapshot_identifier": "recovery-test"}',
+                "body": '{"backup_name": "backup_testing_database_restore_04_24_2023.bak","task_id":"11", "url_rds_instances": "db-clone-restore-database-temporal.ckkscxdfuhqg.us-east-1.rds.amazonaws.com", "backup_target_clone": "db-clone-restore-database-temporal", "database_restore": "testing_database_restore", "db_instance_identifier": "database-poc-test", "db_snapshot_identifier": "recovery-test"}',
                 "attributes": {
                     "ApproximateReceiveCount": "2",
                     "AWSTraceHeader": "Root=1-6447018c-62cb3d2d583ece3120a3f9f5;Parent=0296019439621060;Sampled=0;Lineage=ed3a6528:0",
