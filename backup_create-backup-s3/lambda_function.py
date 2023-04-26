@@ -29,23 +29,24 @@ QuerySaveBackup = "exec msdb.dbo.rds_backup_database @source_db_name='%s', @s3_a
 
 
 def lambda_handler(event, context):
-    sqsBody={}
+    sqsBody = {}
     records = event["Records"]
+    Connection = {}
 
     for message in records:
         try:
             response = RDSClient.describe_db_instances(
                 DBInstanceIdentifier=BACKUP_TARGET
             )
-            
+
             dbInstances = response["DBInstances"]
             if len(dbInstances) < 1:
                 return {"error": "Instances not found"}
 
             rdsInstanceURL = dbInstances[0]["Endpoint"]["Address"]
 
-            sqsBody = json.loads(message['body'])
-            conn = pymssql.connect(
+            sqsBody = json.loads(message["body"])
+            Connection = pymssql.connect(
                 server=rdsInstanceURL,
                 port=PORT,
                 user=USER,
@@ -53,8 +54,8 @@ def lambda_handler(event, context):
                 database=sqsBody["database_restore"],
             )
 
-            cursor = conn.cursor()
-            print(">>> estado 1 <<<")
+            cursor = Connection.cursor()
+            print(">>> Conectando <<< ", rdsInstanceURL)
 
             localDate = datetime.now()
             nameBackup = "backup_%s_%s.bak" % (
@@ -62,35 +63,48 @@ def lambda_handler(event, context):
                 localDate.strftime("%m_%d_%Y"),
             )
 
+            print(">>> Creando Query NAME <<< ", nameBackup)
+
             sqlServerExecute = QuerySaveBackup % (
                 sqsBody["database_restore"],
                 S3_BUCKET_BACKUP,
                 nameBackup,
             )
 
+            print(">>> Creando Query <<<", sqlServerExecute)
+            print(">>> Esperando 1 Minuto<<<")
+            time.sleep(60)
+            print(">>> Termino de esperar y ejecutando query <<<")
             cursor.execute(sqlServerExecute)
 
-            conn.commit()
-            conn.close()
+            Connection.commit()
+
+            print(">>> El requeste Termino Bien <<< ", sqlServerExecute)
+            sendSQSMessage(rdsInstanceURL, nameBackup)
+            # Delete the message from the queue
+            # receipt_handle = message['receiptHandle']
+            # response = SQSClient.delete_message(
+            #     QueueUrl=SQS_QUEUE_URL_TRIGGER,
+            #     ReceiptHandle=receipt_handle
+            # )
 
         except Exception as e:
             print("Error al procesar el mensaje: {}".format(e))
-            time.sleep(10 * 60)
+            result = cursor.fetchall()
+            print({"status": "error", "message": "{}".format(e), "result": result})
+            time.sleep(600)
             continue
 
-        # Delete the message from the queue
-        receipt_handle = message['receiptHandle']
-        response = SQSClient.delete_message(
-            QueueUrl=SQS_QUEUE_URL_TRIGGER,
-            ReceiptHandle=receipt_handle
-        )
-        
-        sendSQSMessage(rdsInstanceURL, nameBackup)
-
-    return {"status": "success"}
+    time.sleep(160)
+    cursor = Connection.cursor()
+    cursor.execute("exec msdb.dbo.rds_task_status @task_id=0")
+    result = cursor.fetchall()
+    Connection.commit()
+    Connection.close()
+    print({"status": "success", "message": "In Progress", "result": result})
 
 
-def sendSQSMessage(urlRdsInstance,  backupName):
+def sendSQSMessage(urlRdsInstance, backupName):
     messageSQS = {
         "backup-target": BACKUP_TARGET_CLONE,
         "database-restore": DATABASE_TO_RESTORE,
@@ -108,13 +122,14 @@ def sendSQSMessage(urlRdsInstance,  backupName):
 
     print(response["MessageId"])
 
+
 if __name__ == "__main__":
     event = {
         "Records": [
             {
                 "messageId": "8a9ecb04-f7c2-4c72-ac99-6d33655a0f55",
                 "receiptHandle": "AQEBIupDkoFE/jd4wS0Y9bkXdJaW4Z4BTbP6X2xRAVb98dV8Ppx4FBUTkAefu6ROZ2tgCn970GprZKfuW9znhOe6ao2WeOIpqnJhXqdaOtAK1nTW27UI5UR3Dqr0e/EMO53OwixzcfImv5P6jndoQYbXZGwKsfG7iDO9PUHvrl70NAt1Niz0RGAQEZZZhPJUyrhRsOGh24tQigbq3T1G7MNJ0LWVMN7mLyNjz1NjYPfPKTAqxEYe97mKpjZrVuHx2vffvCi5VLBasfUiiKrxnGpa7Dn6hWIxDshOJMOVkuBj4J+J35ivZrWiDd6aSYCON7e63Khil4kktyZXiQGHLi68AnadDu8UsiuKeRHH8tuONUigaThDGUiwBAZdGDg8OifI9+klItJIVfMxOY4Uswkg2g==",
-                "body": '{"backup_name": "backup_testing_database_04_24_2023.bak","backup_target_clone": "db-clone-restore-database-temporal", "database_restore": "testing_database", "db_instance_identifier": "db-poc", "db_snapshot_identifier": "backuptestsnapshot"}',
+                "body": '{"backup_name": "backup_testing_database_04_26_2023.bak","backup_target_clone": "db-clone-restore-database-temporal", "database_restore": "testing_database", "db_instance_identifier": "db-poc", "db_snapshot_identifier": "backuptestsnapshot"}',
                 "attributes": {
                     "ApproximateReceiveCount": "2",
                     "AWSTraceHeader": "Root=1-6447018c-62cb3d2d583ece3120a3f9f5;Parent=0296019439621060;Sampled=0;Lineage=ed3a6528:0",

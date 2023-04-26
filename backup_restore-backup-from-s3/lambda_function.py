@@ -26,25 +26,25 @@ QueryRestore = "EXEC msdb.dbo.rds_restore_database @restore_db_name='%s', @s3_ar
 
 def lambda_handler(event, context):
     sqsBody = {}
+    Connection = {}
     records = event["Records"]
+
     for message in records:
         try:
             sqsBody = json.loads(message["body"])
+            print(">>> Validando La existencia de Backup")
             S3Client.Object(S3_BUCKET_BACKUP, sqsBody["backup_name"]).load()
-
-            backup_file = "/tmp/backup.bak"
-            database_restore = sqsBody["database_restore"]
-
-            conn = pymssql.connect(
+            print(">>> Conectando a la instancia Produccion")
+            Connection = pymssql.connect(
                 server=DB_PRODUCTION_RDS_URL,
                 port=PORT,
                 user=USER,
                 password=PASSWORD,
             )
 
-            end_transaction(conn)
+            end_transaction(Connection)
 
-            cursor = conn.cursor()
+            cursor = Connection.cursor()
             restore_sql = QueryRestore % (
                 sqsBody["database_restore"],
                 S3_BUCKET_BACKUP,
@@ -52,26 +52,36 @@ def lambda_handler(event, context):
             )
 
             print(restore_sql)
+            print("ejecutando La restauracion")
             cursor.execute(restore_sql)
-            conn.commit()
-            conn.close()
+            Connection.commit()
+            print(">>> La restauracion a iniciado...")
+
+            # Delete the message from the queue
+            receipt_handle = message["receiptHandle"]
+            response = SQSClient.delete_message(
+                QueueUrl=SQS_QUEUE_URL_TRIGGER, ReceiptHandle=receipt_handle
+            )
 
         except Exception as e:
             print("Error al procesar el mensaje: {}".format(e))
             time.sleep(10 * 60)
             continue
 
-        # Delete the message from the queue
-        receipt_handle = message['receiptHandle']
-        response = SQSClient.delete_message(
-            QueueUrl=SQS_QUEUE_URL_TRIGGER,
-            ReceiptHandle=receipt_handle
-        )
+        time.sleep(160)
+        cursor = Connection.cursor()
+        cursor.execute("exec msdb.dbo.rds_task_status @task_id=0")
+        result = cursor.fetchall()
+        Connection.commit()
+        Connection.close()
+        print({"status": "success", "message": "In Progress", "result": result})
+
 
 # End transaction before executing the stored procedure
 def end_transaction(conn):
     cursor = conn.cursor()
-    cursor.execute('COMMIT')
+    cursor.execute("COMMIT")
+
 
 if __name__ == "__main__":
     event = {
@@ -79,7 +89,7 @@ if __name__ == "__main__":
             {
                 "messageId": "8a9ecb04-f7c2-4c72-ac99-6d33655a0f55",
                 "receiptHandle": "AQEBIupDkoFE/jd4wS0Y9bkXdJaW4Z4BTbP6X2xRAVb98dV8Ppx4FBUTkAefu6ROZ2tgCn970GprZKfuW9znhOe6ao2WeOIpqnJhXqdaOtAK1nTW27UI5UR3Dqr0e/EMO53OwixzcfImv5P6jndoQYbXZGwKsfG7iDO9PUHvrl70NAt1Niz0RGAQEZZZhPJUyrhRsOGh24tQigbq3T1G7MNJ0LWVMN7mLyNjz1NjYPfPKTAqxEYe97mKpjZrVuHx2vffvCi5VLBasfUiiKrxnGpa7Dn6hWIxDshOJMOVkuBj4J+J35ivZrWiDd6aSYCON7e63Khil4kktyZXiQGHLi68AnadDu8UsiuKeRHH8tuONUigaThDGUiwBAZdGDg8OifI9+klItJIVfMxOY4Uswkg2g==",
-                "body": '{"backup_name":"backup_testing_database_04_24_2023.bak" ,"task_id":"11", "url_rds_instances": "db-clone-restore-database-temporal.ckkscxdfuhqg.us-east-1.rds.amazonaws.com", "backup_target_clone": "db-clone-restore-database-temporal", "database_restore": "testing_database", "db_instance_identifier": "db-poc", "db_snapshot_identifier": "backuptestsnapshot"}',
+                "body": '{"backup_name":"backup_testing_database_04_26_2023.bak" ,"task_id":"11", "url_rds_instances": "db-clone-restore-database-temporal.ckkscxdfuhqg.us-east-1.rds.amazonaws.com", "backup_target_clone": "db-clone-restore-database-temporal", "database_restore": "testing_database", "db_instance_identifier": "db-poc", "db_snapshot_identifier": "backuptestsnapshot"}',
                 "attributes": {
                     "ApproximateReceiveCount": "2",
                     "AWSTraceHeader": "Root=1-6447018c-62cb3d2d583ece3120a3f9f5;Parent=0296019439621060;Sampled=0;Lineage=ed3a6528:0",
