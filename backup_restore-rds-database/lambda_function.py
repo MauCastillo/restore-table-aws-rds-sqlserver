@@ -3,7 +3,7 @@ import json
 import os
 
 
-DB_INSTANCE_IDENTIFIER = "database-poc-test"
+DB_INSTANCE_IDENTIFIER = "db-poc"
 DB_SNAP_SHOT_IDENTIFIER = os.environ["DB_SNAP_SHOT_IDENTIFIER"]
 OPTION_GROUP_NAME = os.environ["OPTION_GROUP_NAME"]
 DATABASE_TO_RESTORE = os.environ["DATABASE_TO_RESTORE"]
@@ -57,6 +57,12 @@ def sendSQSMessage():
         DelaySeconds=SQS_DELAY,
         MessageBody=(json.dumps(messageSQS)),
     )
-    print(">>> SQSClient.send_message <<<",response)
-
+    
     return response
+
+
+if __name__ == "__main__":
+    event = {}
+    context = {}
+    result = lambda_handler(event, context)
+    print("lambda_handler: ", result)

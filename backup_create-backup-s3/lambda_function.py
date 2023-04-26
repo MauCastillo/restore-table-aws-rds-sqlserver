@@ -10,13 +10,14 @@ from datetime import datetime
 PORT = 1433  # int(os.environ['DB_PORT'])
 USER = "admin"  # os.environ['DB_USER']
 PASSWORD = "19xdnbdaZDsJPrGSaNyt"  # os.environ['DB_PASSWORD']
-DB_INSTANCE_IDENTIFIER = "database-poc-test"
-DB_SNAP_SHOT_IDENTIFIER = "database-testing-poc-snapshot"
+DB_INSTANCE_IDENTIFIER = "db-poc"
+DB_SNAP_SHOT_IDENTIFIER = "backuptestsnapshot"
 BACKUP_TARGET_CLONE = os.environ["BACKUP_TARGET_CLONE"]
 
 BACKUP_TARGET = "db-clone-restore-database-temporal"
 
 SQS_QUEUE_URL = os.environ["SQS_QUEUE_URL"]
+SQS_QUEUE_URL_TRIGGER = os.environ["SQS_QUEUE_URL_TRIGGER"]
 SQS_DELAY = int(os.environ["SQS_DELAY"])
 DATABASE_TO_RESTORE = os.environ["DATABASE_TO_RESTORE"]
 S3_BUCKET_BACKUP = os.environ["S3_BUCKET_BACKUP"]
@@ -41,14 +42,9 @@ def lambda_handler(event, context):
             if len(dbInstances) < 1:
                 return {"error": "Instances not found"}
 
-            print(dbInstances)
-            print("__________________________")
-
             rdsInstanceURL = dbInstances[0]["Endpoint"]["Address"]
-            print(rdsInstanceURL)
+
             sqsBody = json.loads(message['body'])
-            
-            print("antes de la conexion")
             conn = pymssql.connect(
                 server=rdsInstanceURL,
                 port=PORT,
@@ -81,20 +77,26 @@ def lambda_handler(event, context):
             print("Error al procesar el mensaje: {}".format(e))
             time.sleep(10 * 60)
             continue
+
+        # Delete the message from the queue
+        receipt_handle = message['receiptHandle']
+        response = SQSClient.delete_message(
+            QueueUrl=SQS_QUEUE_URL_TRIGGER,
+            ReceiptHandle=receipt_handle
+        )
         
-        sendSQSMessage(rdsInstanceURL, "11", "backup_testing_database_restore_04_24_2023.bak")
+        sendSQSMessage(rdsInstanceURL, nameBackup)
 
     return {"status": "success"}
 
 
-def sendSQSMessage(urlRdsInstance, taskID, backupName):
+def sendSQSMessage(urlRdsInstance,  backupName):
     messageSQS = {
         "backup-target": BACKUP_TARGET_CLONE,
         "database-restore": DATABASE_TO_RESTORE,
         "db-instance-identifier": DB_INSTANCE_IDENTIFIER,
         "db-snap-shot-identifier": DB_SNAP_SHOT_IDENTIFIER,
         "url_rds_instances": urlRdsInstance,
-        "task_id": taskID,
         "backup_name": backupName,
     }
 
@@ -112,7 +114,7 @@ if __name__ == "__main__":
             {
                 "messageId": "8a9ecb04-f7c2-4c72-ac99-6d33655a0f55",
                 "receiptHandle": "AQEBIupDkoFE/jd4wS0Y9bkXdJaW4Z4BTbP6X2xRAVb98dV8Ppx4FBUTkAefu6ROZ2tgCn970GprZKfuW9znhOe6ao2WeOIpqnJhXqdaOtAK1nTW27UI5UR3Dqr0e/EMO53OwixzcfImv5P6jndoQYbXZGwKsfG7iDO9PUHvrl70NAt1Niz0RGAQEZZZhPJUyrhRsOGh24tQigbq3T1G7MNJ0LWVMN7mLyNjz1NjYPfPKTAqxEYe97mKpjZrVuHx2vffvCi5VLBasfUiiKrxnGpa7Dn6hWIxDshOJMOVkuBj4J+J35ivZrWiDd6aSYCON7e63Khil4kktyZXiQGHLi68AnadDu8UsiuKeRHH8tuONUigaThDGUiwBAZdGDg8OifI9+klItJIVfMxOY4Uswkg2g==",
-                "body": '{"backup_name": "backup_testing_database_restore_04_24_2023.bak","backup_target_clone": "db-clone-restore-database-temporal", "database_restore": "testing_database_restore", "db_instance_identifier": "database-poc-test", "db_snapshot_identifier": "recovery-test"}',
+                "body": '{"backup_name": "backup_testing_database_04_24_2023.bak","backup_target_clone": "db-clone-restore-database-temporal", "database_restore": "testing_database", "db_instance_identifier": "db-poc", "db_snapshot_identifier": "backuptestsnapshot"}',
                 "attributes": {
                     "ApproximateReceiveCount": "2",
                     "AWSTraceHeader": "Root=1-6447018c-62cb3d2d583ece3120a3f9f5;Parent=0296019439621060;Sampled=0;Lineage=ed3a6528:0",
