@@ -31,8 +31,6 @@ QuerySaveBackup = "exec msdb.dbo.rds_backup_database @source_db_name='%s', @s3_a
 def lambda_handler(event, context):
     sqsBody = {}
     records = event["Records"]
-    Connection = {}
-
     for message in records:
         try:
             response = RDSClient.describe_db_instances(
@@ -78,6 +76,7 @@ def lambda_handler(event, context):
             cursor.execute(sqlServerExecute)
 
             Connection.commit()
+            Connection.close()
 
             print(">>> El requeste Termino Bien <<< ", sqlServerExecute)
             sendSQSMessage(rdsInstanceURL, nameBackup)
@@ -95,7 +94,14 @@ def lambda_handler(event, context):
             time.sleep(600)
             continue
 
-    time.sleep(160)
+    time.sleep(60)
+    Connection = pymssql.connect(
+        server=rdsInstanceURL,
+        port=PORT,
+        user=USER,
+        password=PASSWORD,
+        database=sqsBody["database_restore"],
+    )
     cursor = Connection.cursor()
     cursor.execute("exec msdb.dbo.rds_task_status @task_id=0")
     result = cursor.fetchall()

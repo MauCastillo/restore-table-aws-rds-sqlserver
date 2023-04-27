@@ -26,7 +26,14 @@ QueryRestore = "EXEC msdb.dbo.rds_restore_database @restore_db_name='%s', @s3_ar
 
 def lambda_handler(event, context):
     sqsBody = {}
-    Connection = {}
+    Connection = pymssql.connect(
+        server=DB_PRODUCTION_RDS_URL,
+        port=PORT,
+        user=USER,
+        password=PASSWORD,
+        autocommit=True
+    )
+
     records = event["Records"]
 
     for message in records:
@@ -35,14 +42,6 @@ def lambda_handler(event, context):
             print(">>> Validando La existencia de Backup")
             S3Client.Object(S3_BUCKET_BACKUP, sqsBody["backup_name"]).load()
             print(">>> Conectando a la instancia Produccion")
-            Connection = pymssql.connect(
-                server=DB_PRODUCTION_RDS_URL,
-                port=PORT,
-                user=USER,
-                password=PASSWORD,
-            )
-
-            end_transaction(Connection)
 
             cursor = Connection.cursor()
             restore_sql = QueryRestore % (
@@ -51,8 +50,16 @@ def lambda_handler(event, context):
                 sqsBody["backup_name"],
             )
 
+            print(">>> Cerrando las conexiones a la base de datos")
+            # Disconnect all users and applications connected to the database
+            cursor.execute("USE " + sqsBody["database_restore"] + "; ALTER DATABASE " + sqsBody["database_restore"] + " SET SINGLE_USER WITH ROLLBACK IMMEDIATE")
+            
+            # Drop the database
+            print(">>> Eliminando Base de datos")
+            cursor.execute("USE master; DROP DATABASE " + sqsBody["database_restore"])
+
             print(restore_sql)
-            print("ejecutando La restauracion")
+            print("===> ejecutando La restauracion :-)")
             cursor.execute(restore_sql)
             Connection.commit()
             print(">>> La restauracion a iniciado...")
@@ -64,23 +71,18 @@ def lambda_handler(event, context):
             )
 
         except Exception as e:
+            Connection.close()
             print("Error al procesar el mensaje: {}".format(e))
             time.sleep(10 * 60)
             continue
 
-        time.sleep(160)
+        time.sleep(10)
         cursor = Connection.cursor()
         cursor.execute("exec msdb.dbo.rds_task_status @task_id=0")
         result = cursor.fetchall()
         Connection.commit()
         Connection.close()
         print({"status": "success", "message": "In Progress", "result": result})
-
-
-# End transaction before executing the stored procedure
-def end_transaction(conn):
-    cursor = conn.cursor()
-    cursor.execute("COMMIT")
 
 
 if __name__ == "__main__":
