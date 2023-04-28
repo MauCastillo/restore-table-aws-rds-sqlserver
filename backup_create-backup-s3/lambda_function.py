@@ -40,63 +40,63 @@ def lambda_handler(event, context):
     print(records)
 
     for message in records:
-        # try:
-        if isAvaileble(BACKUP_TARGET)["available"] == False:
-            raise Exception("rds instance not available, %s" % BACKUP_TARGET)
+        try:
+            if isAvaileble(BACKUP_TARGET)["available"] == False:
+                raise Exception("rds instance not available, %s" % BACKUP_TARGET)
 
-        response = RDSClient.describe_db_instances(DBInstanceIdentifier=BACKUP_TARGET)
+            response = RDSClient.describe_db_instances(DBInstanceIdentifier=BACKUP_TARGET)
 
-        dbInstances = response["DBInstances"]
-        if len(dbInstances) < 1:
-            return {"error": "Instances not found"}
+            dbInstances = response["DBInstances"]
+            if len(dbInstances) < 1:
+                return {"error": "Instances not found"}
 
-        rdsInstanceURL = dbInstances[0]["Endpoint"]["Address"]
+            rdsInstanceURL = dbInstances[0]["Endpoint"]["Address"]
 
-        sqsBody = json.loads(message["body"])
-        print("body::::   ",sqsBody)
-        connection = pymssql.connect(
-            server=rdsInstanceURL,
-            port=PORT,
-            user=USER,
-            password=PASSWORD,
-            database=sqsBody["database_restore"],
-        )
+            sqsBody = json.loads(message["body"])
+            print("body::::   ",sqsBody)
+            connection = pymssql.connect(
+                server=rdsInstanceURL,
+                port=PORT,
+                user=USER,
+                password=PASSWORD,
+                database=sqsBody["database_restore"],
+            )
 
-        cursor = connection.cursor()
-        print(">>> Conectando <<< ", rdsInstanceURL)
+            cursor = connection.cursor()
+            print(">>> Conectando <<< ", rdsInstanceURL)
 
-        localDate = datetime.now()
-        nameBackup = "backup_%s_%s_%s.bak" % (
-            sqsBody["database_restore"],
-            localDate.strftime("%m_%d_%Y"),
-            token(tokenSize),
-        )
+            localDate = datetime.now()
+            nameBackup = "backup_%s_%s_%s.bak" % (
+                sqsBody["database_restore"],
+                localDate.strftime("%m_%d_%Y"),
+                token(tokenSize),
+            )
 
-        print(">>> Creando Query NAME <<< ", nameBackup)
+            print(">>> Creando Query NAME <<< ", nameBackup)
 
-        sqlServerExecute = QuerySaveBackup % (
-            sqsBody["database_restore"],
-            S3_BUCKET_BACKUP,
-            nameBackup,
-        )
+            sqlServerExecute = QuerySaveBackup % (
+                sqsBody["database_restore"],
+                S3_BUCKET_BACKUP,
+                nameBackup,
+            )
 
-        print(">>> Termino de esperar y ejecutando query <<<")
-        cursor.execute(sqlServerExecute)
-        connection.commit()
+            print(">>> Termino de esperar y ejecutando query <<<")
+            cursor.execute(sqlServerExecute)
+            connection.commit()
 
-        print(">>> El requeste Termino Bien <<< ", sqlServerExecute)
-        taskStatus = isTaskInProgress(connection)
-        # Delete the message from the queue
-        receipt_handle = message["receiptHandle"]
-        response = SQSClient.delete_message(
-            QueueUrl=SQS_QUEUE_URL_TRIGGER, ReceiptHandle=receipt_handle
-        )
-        connection.close()
+            print(">>> El requeste Termino Bien <<< ", sqlServerExecute)
+            taskStatus = isTaskInProgress(connection)
+            # Delete the message from the queue
+            # receipt_handle = message["receiptHandle"]
+            # response = SQSClient.delete_message(
+            #     QueueUrl=SQS_QUEUE_URL_TRIGGER, ReceiptHandle=receipt_handle
+            # )
+            connection.close()
 
-    # except Exception as e:
-    #     print({"status": "error", "message": "{}".format(e)})
-    #     #time.sleep(600)
-    #     raise Exception(e)
+        except Exception as e:
+            print({"status": "error", "message": "{}".format(e)})
+            time.sleep(500)
+            raise Exception(e)
 
     sendSQSMessage(rdsInstanceURL, nameBackup)
     print({"status": "success", "message": "In Progress", "task_status": taskStatus})

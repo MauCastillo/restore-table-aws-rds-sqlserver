@@ -9,7 +9,6 @@ USER = "admin"  # os.environ['DB_USER']
 PASSWORD = "19xdnbdaZDsJPrGSaNyt"  # os.environ['DB_PASSWORD']
 DB_SNAP_SHOT_IDENTIFIER = "backuptestsnapshot"
 BACKUP_TARGET = "db-clone-restore-database-temporal"
-
 SQS_DELAY = int(os.environ["SQS_DELAY"])
 DATABASE_TO_RESTORE = os.environ["DATABASE_TO_RESTORE"]
 S3_BUCKET_BACKUP = os.environ["S3_BUCKET_BACKUP"]
@@ -88,7 +87,7 @@ def lambda_handler(event, context):
 
         except Exception as e:
             print("Error al procesar el mensaje: {}".format(e))
-            time.sleep(10 * 60)
+            time.sleep(120)
             continue
         finally:
             connection.close()
