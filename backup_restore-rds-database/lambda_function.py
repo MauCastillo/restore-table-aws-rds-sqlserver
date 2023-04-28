@@ -55,7 +55,7 @@ def sendSQSMessage():
     response = SQSClient.send_message(
         QueueUrl=SQS_QUEUE_URL,
         DelaySeconds=SQS_DELAY,
-        MessageBody=(json.dumps(messageSQS)),
+        MessageBody=json.dumps(messageSQS),
     )
     
     return response
