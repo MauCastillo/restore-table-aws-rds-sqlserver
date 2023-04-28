@@ -3,6 +3,9 @@ import os
 import time
 import pymssql
 import boto3
+import random
+import string
+
 from datetime import datetime
 
 # os.environ['DB_HOST']
@@ -26,13 +29,20 @@ RDSClient = boto3.client("rds")
 SQSClient = boto3.client("sqs")
 S3Client = boto3.resource("s3")
 QuerySaveBackup = "exec msdb.dbo.rds_backup_database @source_db_name='%s', @s3_arn_to_backup_to='arn:aws:s3:::%s/%s', @overwrite_S3_backup_file=1;"
+tokenSize = 5
 
 
 def lambda_handler(event, context):
     sqsBody = {}
+    nameBackup = ""
     records = event["Records"]
+    taskStatus = ""
+
     for message in records:
         try:
+            if isAvaileble(BACKUP_TARGET)["available"] == False:
+                raise Exception("rds instance not available, %s" % BACKUP_TARGET)
+
             response = RDSClient.describe_db_instances(
                 DBInstanceIdentifier=BACKUP_TARGET
             )
@@ -44,7 +54,7 @@ def lambda_handler(event, context):
             rdsInstanceURL = dbInstances[0]["Endpoint"]["Address"]
 
             sqsBody = json.loads(message["body"])
-            Connection = pymssql.connect(
+            connection = pymssql.connect(
                 server=rdsInstanceURL,
                 port=PORT,
                 user=USER,
@@ -52,13 +62,14 @@ def lambda_handler(event, context):
                 database=sqsBody["database_restore"],
             )
 
-            cursor = Connection.cursor()
+            cursor = connection.cursor()
             print(">>> Conectando <<< ", rdsInstanceURL)
 
             localDate = datetime.now()
-            nameBackup = "backup_%s_%s.bak" % (
+            nameBackup = "backup_%s_%s_%s.bak" % (
                 sqsBody["database_restore"],
                 localDate.strftime("%m_%d_%Y"),
+                token(tokenSize),
             )
 
             print(">>> Creando Query NAME <<< ", nameBackup)
@@ -69,45 +80,57 @@ def lambda_handler(event, context):
                 nameBackup,
             )
 
-            print(">>> Creando Query <<<", sqlServerExecute)
-            print(">>> Esperando 1 Minuto<<<")
-            time.sleep(60)
             print(">>> Termino de esperar y ejecutando query <<<")
             cursor.execute(sqlServerExecute)
-
-            Connection.commit()
-            Connection.close()
+            connection.commit()
 
             print(">>> El requeste Termino Bien <<< ", sqlServerExecute)
-            sendSQSMessage(rdsInstanceURL, nameBackup)
+            taskStatus = isTaskInProgress(connection)
             # Delete the message from the queue
-            # receipt_handle = message['receiptHandle']
-            # response = SQSClient.delete_message(
-            #     QueueUrl=SQS_QUEUE_URL_TRIGGER,
-            #     ReceiptHandle=receipt_handle
-            # )
+            receipt_handle = message["receiptHandle"]
+            response = SQSClient.delete_message(
+                QueueUrl=SQS_QUEUE_URL_TRIGGER, ReceiptHandle=receipt_handle
+            )
 
         except Exception as e:
-            print("Error al procesar el mensaje: {}".format(e))
-            result = cursor.fetchall()
-            print({"status": "error", "message": "{}".format(e), "result": result})
+            print({"status": "error", "message": "{}".format(e)})
             time.sleep(600)
             continue
+        finally:
+            connection.close()
 
-    time.sleep(60)
-    Connection = pymssql.connect(
-        server=rdsInstanceURL,
-        port=PORT,
-        user=USER,
-        password=PASSWORD,
-        database=sqsBody["database_restore"],
-    )
-    cursor = Connection.cursor()
-    cursor.execute("exec msdb.dbo.rds_task_status @task_id=0")
-    result = cursor.fetchall()
-    Connection.commit()
-    Connection.close()
-    print({"status": "success", "message": "In Progress", "result": result})
+    sendSQSMessage(rdsInstanceURL, nameBackup)
+    print({"status": "success", "message": "In Progress", "task_status": taskStatus})
+
+
+def isAvaileble(rdsInstanceName):
+    response = RDSClient.describe_db_instances(DBInstanceIdentifier=rdsInstanceName)
+
+    dbInstances = response["DBInstances"]
+    if len(dbInstances) < 1:
+        return {"error": "Instances not found", "status": "error", "available": False}
+
+    rdsInstanceStatus = dbInstances[0]["DBInstanceStatus"]
+
+    print(rdsInstanceStatus)
+    return {
+        "error": "None",
+        "status": rdsInstanceStatus,
+        "available": rdsInstanceStatus == "available",
+    }
+
+
+def token(lenght):
+    letters = string.ascii_lowercase + string.digits
+    return "".join(random.choice(letters) for i in range(lenght))
+
+
+def isTaskInProgress(conn):
+    cursor = conn.cursor()
+    cursor.execute("EXEC msdb.dbo.rds_task_status @task_id=0")
+    result = cursor.fetchone()
+    print("isTaskInProgress", result[5])
+    return result[5]
 
 
 def sendSQSMessage(urlRdsInstance, backupName):
