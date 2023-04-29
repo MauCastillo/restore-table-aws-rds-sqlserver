@@ -42,7 +42,7 @@ def lambda_handler(event, context):
 
             sqsBody = json.loads(message["body"])
             if isAvaileble(sqsBody["db-instance-identifier"])["available"] == False:
-                Exception("rds instance not available, %s" % BACKUP_TARGET)
+                Exception("rds instance not available, %s" % sqsBody["db-instance-identifier"])
 
             connection = pymssql.connect(
                 server=DB_PRODUCTION_RDS_URL,
