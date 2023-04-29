@@ -91,6 +91,7 @@ def lambda_handler(event, context):
             # response = SQSClient.delete_message(
             #     QueueUrl=SQS_QUEUE_URL_TRIGGER, ReceiptHandle=receipt_handle
             # )
+
             connection.close()
 
         except Exception as e:

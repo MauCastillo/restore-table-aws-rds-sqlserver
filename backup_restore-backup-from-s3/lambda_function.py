@@ -9,7 +9,6 @@ USER = "admin"  # os.environ['DB_USER']
 PASSWORD = "19xdnbdaZDsJPrGSaNyt"  # os.environ['DB_PASSWORD']
 DB_SNAP_SHOT_IDENTIFIER = "backuptestsnapshot"
 BACKUP_TARGET = "db-clone-restore-database-temporal"
-SQS_DELAY = int(os.environ["SQS_DELAY"])
 DATABASE_TO_RESTORE = os.environ["DATABASE_TO_RESTORE"]
 S3_BUCKET_BACKUP = os.environ["S3_BUCKET_BACKUP"]
 DB_PRODUCTION_RDS_URL = os.environ["DB_PRODUCTION_RDS_URL"]
@@ -24,18 +23,23 @@ QueryRestore = "EXEC msdb.dbo.rds_restore_database @restore_db_name='%s', @s3_ar
 
 
 def lambda_handler(event, context):
-    sqsBody = {}
+    # Receive messages from the SQS queue
+    response = SQSClient.receive_message(
+        QueueUrl=SQS_QUEUE_URL_TRIGGER,
+        MaxNumberOfMessages=1
+    )
 
-    records = event["Records"]
+    # Process the received messages
+    messages = response.get('Messages', [])
 
-    for message in records:
+    for message in messages:
         try:
             if isAvaileble(BACKUP_TARGET)["available"] == False:
                 raise Exception("rds instance not available, %s" % BACKUP_TARGET)
-            
+
             if isTaskInProgress() != "SUCCESS":
                 raise Exception("backup creation not finished")
-            
+
             sqsBody = json.loads(message["body"])
             if isAvaileble(sqsBody["db-instance-identifier"])["available"] == False:
                 Exception("rds instance not available, %s" % BACKUP_TARGET)
@@ -78,19 +82,18 @@ def lambda_handler(event, context):
             cursor.execute(restore_sql)
             connection.commit()
             print(">>> La restauracion a iniciado...")
+            connection.close()
 
             # Delete the message from the queue
-            receipt_handle = message["receiptHandle"]
-            response = SQSClient.delete_message(
-                QueueUrl=SQS_QUEUE_URL_TRIGGER, ReceiptHandle=receipt_handle
-            )
+            # receipt_handle = message["receiptHandle"]
+            # SQSClient.delete_message(
+            #     QueueUrl=SQS_QUEUE_URL_TRIGGER, ReceiptHandle=receipt_handle
+            # )
 
         except Exception as e:
             print("Error al procesar el mensaje: {}".format(e))
-            time.sleep(120)
+
             continue
-        finally:
-            connection.close()
 
         print({"status": "success", "message": "In Progress", "result": result})
 
