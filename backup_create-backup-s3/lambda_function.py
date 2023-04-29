@@ -135,8 +135,8 @@ def isTaskInProgress(conn):
 
 def sendSQSMessage(urlRdsInstance, backupName):
     messageSQS = {
-        "backup-target": BACKUP_TARGET_CLONE,
-        "database-restore": DATABASE_TO_RESTORE,
+        "backup_target": BACKUP_TARGET_CLONE,
+        "database_restore": DATABASE_TO_RESTORE,
         "db-instance-identifier": DB_INSTANCE_IDENTIFIER,
         "db-snap-shot-identifier": DB_SNAP_SHOT_IDENTIFIER,
         "url_rds_instances": urlRdsInstance,
