@@ -27,19 +27,34 @@ S3_BUCKET_BACKUP = os.environ["S3_BUCKET_BACKUP"]
 
 RDSClient = boto3.client("rds")
 SQSClient = boto3.client("sqs")
-S3Client = boto3.resource("s3")
+
 QuerySaveBackup = "exec msdb.dbo.rds_backup_database @source_db_name='%s', @s3_arn_to_backup_to='arn:aws:s3:::%s/%s', @overwrite_S3_backup_file=1;"
 tokenSize = 5
 
 
 def lambda_handler(event, context):
+
     sqsBody = {}
     nameBackup = ""
     records = event["Records"]
     taskStatus = ""
-    print(records)
+    snsMessage = json.loads(records["Sns"]["Message"])
+    print(snsMessage)
+    print("________")
 
-    for message in records:
+    # Receive messages from the SQS queue
+    print(" >>> La cola <<< ", SQS_QUEUE_URL_TRIGGER)
+    response = SQSClient.receive_message(
+        QueueUrl=SQS_QUEUE_URL_TRIGGER, MaxNumberOfMessages=1
+    )
+
+    print(" >>> NO siguio <<< ")
+
+    # Process the received messages
+    messages = response.get("Messages", [])
+    print(" >>> message <<< ", len(messages))
+
+    for message in messages:
         try:
             if isAvaileble(BACKUP_TARGET)["available"] == False:
                 raise Exception("rds instance not available, %s" % BACKUP_TARGET)
@@ -52,7 +67,7 @@ def lambda_handler(event, context):
 
             rdsInstanceURL = dbInstances[0]["Endpoint"]["Address"]
 
-            sqsBody = json.loads(message["body"])
+            sqsBody = json.loads(message["Body"])
             print("body::::   ",sqsBody)
             connection = pymssql.connect(
                 server=rdsInstanceURL,
@@ -87,10 +102,10 @@ def lambda_handler(event, context):
             print(">>> El requeste Termino Bien <<< ", sqlServerExecute)
             taskStatus = isTaskInProgress(connection)
             # Delete the message from the queue
-            # receipt_handle = message["receiptHandle"]
-            # response = SQSClient.delete_message(
-            #     QueueUrl=SQS_QUEUE_URL_TRIGGER, ReceiptHandle=receipt_handle
-            # )
+            receipt_handle = message["ReceiptHandle"]
+            response = SQSClient.delete_message(
+                QueueUrl=SQS_QUEUE_URL_TRIGGER, ReceiptHandle=receipt_handle
+            )
 
             connection.close()
 

@@ -24,12 +24,16 @@ QueryRestore = "EXEC msdb.dbo.rds_restore_database @restore_db_name='%s', @s3_ar
 
 def lambda_handler(event, context):
     # Receive messages from the SQS queue
+    print(" >>> La cola <<< ", SQS_QUEUE_URL_TRIGGER)
     response = SQSClient.receive_message(
         QueueUrl=SQS_QUEUE_URL_TRIGGER, MaxNumberOfMessages=1
     )
 
+    print(" >>> NO siguio <<< ")
+
     # Process the received messages
     messages = response.get("Messages", [])
+    print(" >>> message <<< ", len(messages))
 
     for message in messages:
         if isAvaileble(BACKUP_TARGET)["available"] == False:
@@ -80,10 +84,10 @@ def lambda_handler(event, context):
         print(">>> La restauracion a iniciado...")
         connection.close()
         print("____________________________")
-        print( message)
+        print(message)
         print("____________________________")
         # Delete the message from the queue
-        receipt_handle = message['ReceiptHandle']
+        receipt_handle = message["ReceiptHandle"]
 
         SQSClient.delete_message(
             QueueUrl=SQS_QUEUE_URL_TRIGGER, ReceiptHandle=receipt_handle
@@ -93,6 +97,7 @@ def lambda_handler(event, context):
 
 
 def isAvaileble(rdsInstanceName):
+    print(">> isAvaileble(rdsInstanceName) <<", rdsInstanceName)
     response = RDSClient.describe_db_instances(DBInstanceIdentifier=rdsInstanceName)
 
     dbInstances = response["DBInstances"]
@@ -110,7 +115,6 @@ def isAvaileble(rdsInstanceName):
 
 
 if __name__ == "__main__":
-
     print("cambio")
     result = lambda_handler({}, {})
     print("lambda_handler: ", result)
