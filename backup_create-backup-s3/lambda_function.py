@@ -33,42 +33,50 @@ tokenSize = 5
 
 
 def lambda_handler(event, context):
-
-    sqsBody = {}
     nameBackup = ""
-    records = event["Records"]
+    rdsInstanceURL = ""
+
     taskStatus = ""
-    snsMessage = json.loads(records["Sns"]["Message"])
-    print(snsMessage)
-    print("________")
+    sns_message = {}
 
-    # Receive messages from the SQS queue
-    print(" >>> La cola <<< ", SQS_QUEUE_URL_TRIGGER)
-    response = SQSClient.receive_message(
-        QueueUrl=SQS_QUEUE_URL_TRIGGER, MaxNumberOfMessages=1
-    )
+    for record in event["Records"]:
+        sns_message = json.loads(record["Sns"]["Message"])
+        print(sns_message)
+        print("_____________________")
+        print(sns_message["Source ID"])
 
-    print(" >>> NO siguio <<< ")
+    if sns_message["Source ID"] != "db-clone-restore-database-temporal":
+        return {"status": "error", "message": "instance not recovery"}
+    try:
+        # Receive messages from the SQS queue
+        response = SQSClient.receive_message(
+            QueueUrl=SQS_QUEUE_URL_TRIGGER, MaxNumberOfMessages=1
+        )
 
-    # Process the received messages
-    messages = response.get("Messages", [])
-    print(" >>> message <<< ", len(messages))
+        if isAvaileble(BACKUP_TARGET)["available"] == False:
+            raise Exception("rds instance not available, %s" % BACKUP_TARGET)
 
-    for message in messages:
-        try:
-            if isAvaileble(BACKUP_TARGET)["available"] == False:
-                raise Exception("rds instance not available, %s" % BACKUP_TARGET)
+        print("isAvaileble")
 
-            response = RDSClient.describe_db_instances(DBInstanceIdentifier=BACKUP_TARGET)
+        response = RDSClient.describe_db_instances(DBInstanceIdentifier=BACKUP_TARGET)
+        print("RDSClient.describe_db_instances")
 
-            dbInstances = response["DBInstances"]
-            if len(dbInstances) < 1:
-                return {"error": "Instances not found"}
+        dbInstances = response["DBInstances"]
+        if len(dbInstances) < 1:
+            return {"error": "Instances not found"}
 
-            rdsInstanceURL = dbInstances[0]["Endpoint"]["Address"]
+        print("response[DBInstances]")
 
+        rdsInstanceURL = dbInstances[0]["Endpoint"]["Address"]
+        # Process the received messages
+        messages = response.get("Messages", [])
+        print(" >>> message <<< ", len(messages))
+
+        for message in messages:
             sqsBody = json.loads(message["Body"])
-            print("body::::   ",sqsBody)
+
+            print("Body")
+
             connection = pymssql.connect(
                 server=rdsInstanceURL,
                 port=PORT,
@@ -76,9 +84,8 @@ def lambda_handler(event, context):
                 password=PASSWORD,
                 database=sqsBody["database_restore"],
             )
-
+            print("Connectando ", rdsInstanceURL)
             cursor = connection.cursor()
-            print(">>> Conectando <<< ", rdsInstanceURL)
 
             localDate = datetime.now()
             nameBackup = "backup_%s_%s_%s.bak" % (
@@ -86,8 +93,6 @@ def lambda_handler(event, context):
                 localDate.strftime("%m_%d_%Y"),
                 token(tokenSize),
             )
-
-            print(">>> Creando Query NAME <<< ", nameBackup)
 
             sqlServerExecute = QuerySaveBackup % (
                 sqsBody["database_restore"],
@@ -109,16 +114,18 @@ def lambda_handler(event, context):
 
             connection.close()
 
-        except Exception as e:
-            print({"status": "error", "message": "{}".format(e)})
-            time.sleep(500)
-            raise Exception(e)
+        sendSQSMessage(rdsInstanceURL, nameBackup)
+        print(
+            {"status": "success", "message": "In Progress", "task_status": taskStatus}
+        )
 
-    sendSQSMessage(rdsInstanceURL, nameBackup)
-    print({"status": "success", "message": "In Progress", "task_status": taskStatus})
+    except Exception as e:
+        print({"status": "error", "message": "{}".format(e)})
+        raise Exception(e)
 
 
 def isAvaileble(rdsInstanceName):
+    time.sleep(340)
     response = RDSClient.describe_db_instances(DBInstanceIdentifier=rdsInstanceName)
 
     dbInstances = response["DBInstances"]
