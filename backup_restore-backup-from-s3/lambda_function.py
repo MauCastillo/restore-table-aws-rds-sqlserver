@@ -19,8 +19,12 @@ SQSClient = boto3.client("sqs")
 S3Client = boto3.resource("s3")
 
 QUERY_DELETE_DATABASE = (
-    "IF EXISTS (SELECT name FROM sys.databases WHERE name = '%s') DROP DATABASE %s; "
+    "DROP DATABASE %s;"
 )
+QUERY_CLOSE_CONECTION_DATABASE = (
+    "USE %s; ALTER DATABASE %s SET SINGLE_USER WITH ROLLBACK IMMEDIATE;"
+)
+
 QueryRestore = "EXEC msdb.dbo.rds_restore_database @restore_db_name='%s', @s3_arn_to_restore_from='arn:aws:s3:::%s/%s';"
 
 
@@ -59,32 +63,32 @@ def lambda_handler(event, context):
         )
 
         cursor = connection.cursor()
+
+        if isExistDatabase(sqsBody["backup_name"], connection):
+            print(">>> Cerrando las conexiones a la base de datos")
+            # Disconnect all users and applications connected to the database
+            queryStop = QUERY_CLOSE_CONECTION_DATABASE % (
+                sqsBody["database_restore"],
+                sqsBody["database_restore"],
+            )
+
+            cursor.execute(queryStop)
+
+            # Drop the database
+            print(">>> Eliminando Base de datos")
+            deleteQuery = QUERY_DELETE_DATABASE % (
+                sqsBody["database_restore"],
+                sqsBody["database_restore"],
+            )
+
+            cursor.execute(deleteQuery)
+            time.sleep(30)
+
         restore_sql = QueryRestore % (
             sqsBody["database_restore"],
             S3_BUCKET_BACKUP,
             sqsBody["backup_name"],
         )
-
-        print(">>> Cerrando las conexiones a la base de datos")
-        # Disconnect all users and applications connected to the database
-        cursor.execute(
-            "USE "
-            + sqsBody["database_restore"]
-            + "; ALTER DATABASE "
-            + sqsBody["database_restore"]
-            + " SET SINGLE_USER WITH ROLLBACK IMMEDIATE"
-        )
-
-        # Drop the database
-        print(">>> Eliminando Base de datos")
-        deleteQuery = QUERY_DELETE_DATABASE % (
-            sqsBody["database_restore"],
-            sqsBody["database_restore"],
-        )
-
-        cursor.execute(deleteQuery)
-        time.sleep(30)
-
         print(restore_sql)
         print("===> ejecutando La restauracion :-)")
         cursor.execute(restore_sql)
@@ -120,6 +124,23 @@ def isAvaileble(rdsInstanceName):
         "status": rdsInstanceStatus,
         "available": rdsInstanceStatus == "available",
     }
+
+
+def isExistDatabase(db_name, connection):
+    # Define the query
+    query = "SELECT name FROM sys.databases WHERE name = '%s'" % db_name
+    print("isExistDatabase",query)
+
+    cursor = connection.cursor()
+    # Execute the query
+    cursor.execute(query)
+    result = cursor.fetchone()
+    print(result)
+    # Check if the database exists
+    if result is not None and result[0]:
+        return True
+
+    return False
 
 
 if __name__ == "__main__":
