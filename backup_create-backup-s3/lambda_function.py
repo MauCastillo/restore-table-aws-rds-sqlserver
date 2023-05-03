@@ -34,16 +34,13 @@ tokenSize = 5
 
 def lambda_handler(event, context):
     nameBackup = ""
-    rdsInstanceURL = ""
+    rdsInstanceCloneURL = ""
 
     taskStatus = ""
     sns_message = {}
 
     for record in event["Records"]:
         sns_message = json.loads(record["Sns"]["Message"])
-        print(sns_message)
-        print("_____________________")
-        print(sns_message["Source ID"])
 
     if sns_message["Source ID"] != "db-clone-restore-database-temporal":
         return {"status": "error", "message": "instance not recovery"}
@@ -51,41 +48,24 @@ def lambda_handler(event, context):
         if isAvaileble(BACKUP_TARGET)["available"] == False:
             raise Exception("rds instance not available, %s" % BACKUP_TARGET)
 
-        print("isAvaileble")
-
-        response = RDSClient.describe_db_instances(DBInstanceIdentifier=BACKUP_TARGET)
-        print("RDSClient.describe_db_instances")
-
-        dbInstances = response["DBInstances"]
-        if len(dbInstances) < 1:
-            return {"error": "Instances not found"}
-
-        print("response[DBInstances]")
-
-        rdsInstanceURL = dbInstances[0]["Endpoint"]["Address"]
+        rdsInstanceCloneURL = getURLinstance(BACKUP_TARGET)
 
         # Receive messages from the SQS queue
         sqsRespose = SQSClient.receive_message(
             QueueUrl=SQS_QUEUE_URL_TRIGGER, MaxNumberOfMessages=1
         )
-        
         messages = sqsRespose.get("Messages", [])
-        print(" >>> message <<< ", len(messages))
 
         # Process the received messages
         for message in messages:
             sqsBody = json.loads(message["Body"])
-
-            print("Body")
-
             connection = pymssql.connect(
-                server=rdsInstanceURL,
+                server=rdsInstanceCloneURL,
                 port=PORT,
                 user=USER,
                 password=PASSWORD,
                 database=sqsBody["database_restore"],
             )
-            print("Connectando ", rdsInstanceURL)
             cursor = connection.cursor()
 
             localDate = datetime.now()
@@ -101,11 +81,10 @@ def lambda_handler(event, context):
                 nameBackup,
             )
 
-            print(">>> Termino de esperar y ejecutando query <<<")
+
             cursor.execute(sqlServerExecute)
             connection.commit()
 
-            print(">>> El requeste Termino Bien <<< ", sqlServerExecute)
             taskStatus = isTaskInProgress(connection)
             # Delete the message from the queue
             receipt_handle = message["ReceiptHandle"]
@@ -115,7 +94,7 @@ def lambda_handler(event, context):
 
             connection.close()
 
-        sendSQSMessage(rdsInstanceURL, nameBackup)
+        sendSQSMessage(rdsInstanceCloneURL, nameBackup)
         print(
             {"status": "success", "message": "In Progress", "task_status": taskStatus}
         )
@@ -124,9 +103,16 @@ def lambda_handler(event, context):
         print({"status": "error", "message": "{}".format(e)})
         raise Exception(e)
 
+def getURLinstance(instanceIdententifier):
+        response = RDSClient.describe_db_instances(DBInstanceIdentifier=instanceIdententifier)
+        dbInstances = response["DBInstances"]
+        if len(dbInstances) < 1:
+            return ""
+
+        return dbInstances[0]["Endpoint"]["Address"]
 
 def isAvaileble(rdsInstanceName):
-    time.sleep(340)
+    time.sleep(240)
     response = RDSClient.describe_db_instances(DBInstanceIdentifier=rdsInstanceName)
 
     dbInstances = response["DBInstances"]
@@ -160,8 +146,8 @@ def sendSQSMessage(urlRdsInstance, backupName):
     messageSQS = {
         "backup_target": BACKUP_TARGET_CLONE,
         "database_restore": DATABASE_TO_RESTORE,
-        "db-instance-identifier": DB_INSTANCE_IDENTIFIER,
-        "db-snap-shot-identifier": DB_SNAP_SHOT_IDENTIFIER,
+        "db_instance_identifier": DB_INSTANCE_IDENTIFIER,
+        "db_snap_shot_identifier": DB_SNAP_SHOT_IDENTIFIER,
         "url_rds_instances": urlRdsInstance,
         "backup_name": backupName,
     }
