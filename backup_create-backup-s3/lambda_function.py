@@ -48,11 +48,6 @@ def lambda_handler(event, context):
     if sns_message["Source ID"] != "db-clone-restore-database-temporal":
         return {"status": "error", "message": "instance not recovery"}
     try:
-        # Receive messages from the SQS queue
-        response = SQSClient.receive_message(
-            QueueUrl=SQS_QUEUE_URL_TRIGGER, MaxNumberOfMessages=1
-        )
-
         if isAvaileble(BACKUP_TARGET)["available"] == False:
             raise Exception("rds instance not available, %s" % BACKUP_TARGET)
 
@@ -68,10 +63,16 @@ def lambda_handler(event, context):
         print("response[DBInstances]")
 
         rdsInstanceURL = dbInstances[0]["Endpoint"]["Address"]
-        # Process the received messages
-        messages = response.get("Messages", [])
+
+        # Receive messages from the SQS queue
+        sqsRespose = SQSClient.receive_message(
+            QueueUrl=SQS_QUEUE_URL_TRIGGER, MaxNumberOfMessages=1
+        )
+        
+        messages = sqsRespose.get("Messages", [])
         print(" >>> message <<< ", len(messages))
 
+        # Process the received messages
         for message in messages:
             sqsBody = json.loads(message["Body"])
 

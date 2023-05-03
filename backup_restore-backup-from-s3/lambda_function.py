@@ -18,7 +18,9 @@ RDSClient = boto3.client("rds")
 SQSClient = boto3.client("sqs")
 S3Client = boto3.resource("s3")
 
-QueryRemoveDatabase = "DROP DATABASE %s;"
+QUERY_DELETE_DATABASE = (
+    "IF EXISTS (SELECT name FROM sys.databases WHERE name = '%s') DROP DATABASE %s; "
+)
 QueryRestore = "EXEC msdb.dbo.rds_restore_database @restore_db_name='%s', @s3_arn_to_restore_from='arn:aws:s3:::%s/%s';"
 
 
@@ -75,7 +77,13 @@ def lambda_handler(event, context):
 
         # Drop the database
         print(">>> Eliminando Base de datos")
-        cursor.execute("USE master; DROP DATABASE " + sqsBody["database_restore"])
+        deleteQuery = QUERY_DELETE_DATABASE % (
+            sqsBody["database_restore"],
+            sqsBody["database_restore"],
+        )
+
+        cursor.execute(deleteQuery)
+        time.sleep(30)
 
         print(restore_sql)
         print("===> ejecutando La restauracion :-)")
